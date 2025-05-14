@@ -1,0 +1,20 @@
+# server configuration
+listen: 0.0.0.0:3000
+discovery-url: https://your-keycloak-server/realms/your-realm
+client-id: your-client-id
+client-secret: your-client-secret
+redirection-url: https://auth.your-internal-domain
+encryption-key: a-very-long-encryption-key-for-cookies
+
+# upstream configuration
+upstream-url: http://10.10.10.10:80
+resources:
+  - uri: /*
+    methods:
+      - GET
+      - POST
+    roles:
+      - user
+
+# security
+secure-cookie: true

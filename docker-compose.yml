@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  traefik:
+    image: traefik:v3.3
+    # Same configuration as above
+
+  keycloak-gatekeeper:
+    image: quay.io/louketo/louketo-proxy:latest
+    container_name: keycloak-gatekeeper
+    restart: unless-stopped
+    command:
+      - --config=/config/config.yml
+    volumes:
+      - ./data/gatekeeper/config.yml:/config/config.yml:ro
+    networks:
+      - traefik_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gatekeeper.rule=Host(`auth.your-internal-domain`)"
+      - "traefik.http.routers.gatekeeper.entrypoints=websecure"
+      - "traefik.http.routers.gatekeeper.tls=true"
+      - "traefik.http.services.gatekeeper.loadbalancer.server.port=3000"
