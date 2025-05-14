@@ -1,0 +1,41 @@
+version: '3'
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./data/config.yml:/etc/traefik/config.yml:ro
+      - ./data/certificates:/etc/traefik/certificates:ro
+    networks:
+      - traefik_network
+
+  traefik-forward-auth:
+    image: thomseddon/traefik-forward-auth:latest
+    container_name: traefik-forward-auth
+    restart: unless-stopped
+    environment:
+      - DEFAULT_PROVIDER=oidc
+      - PROVIDERS_OIDC_CLIENT_ID=your-client-id
+      - PROVIDERS_OIDC_CLIENT_SECRET=your-client-secret
+      - PROVIDERS_OIDC_ISSUER_URL=https://your-keycloak-server/realms/your-realm
+      - SECRET=something-random-and-secret
+      - COOKIE_DOMAIN=your-internal-domain
+      - INSECURE_COOKIE=false
+      - AUTH_HOST=auth.your-internal-domain
+      - URL_PATH=/_oauth
+    networks:
+      - traefik_network
+
+networks:
+  traefik_network:
+    external: false

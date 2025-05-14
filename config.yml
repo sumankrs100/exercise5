@@ -1,0 +1,32 @@
+http:
+  routers:
+    dashboard:
+      rule: "Host(`traefik.your-internal-domain`)"
+      service: "api@internal"
+      entryPoints:
+        - websecure
+      tls: {}
+      middlewares:
+        - auth
+      
+    ui-app:
+      rule: "Host(`app.your-internal-domain`)"
+      service: ui-app-service
+      entryPoints:
+        - websecure
+      tls: {}
+      middlewares:
+        - auth
+
+  services:
+    ui-app-service:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.10:80"
+
+  middlewares:
+    auth:
+      forwardAuth:
+        address: "http://traefik-forward-auth:4181"
+        authResponseHeaders:
+          - "X-Forwarded-User"
