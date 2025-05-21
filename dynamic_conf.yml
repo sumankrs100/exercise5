@@ -1,0 +1,90 @@
+# traefik.yml - Static configuration
+api:
+  dashboard: true
+  insecure: true
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+# Optional: Enable ACME for HTTPS
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: your-email@example.com
+#       storage: acme.json
+#       httpChallenge:
+#         entryPoint: web
+
+---
+# dynamic.yml - Dynamic configuration
+
+http:
+  # Services
+  services:
+    react-ui-service:
+      loadBalancer:
+        servers:
+          - url: "http://your-react-server:3000"  # Replace with your React server URL
+        passHostHeader: true
+        healthCheck:
+          path: /
+          interval: 10s
+          timeout: 5s
+
+  # Routers
+  routers:
+    # Router for React UI application
+    react-ui-router:
+      rule: "PathPrefix(`/app`)"
+      service: react-ui-service
+      entryPoints:
+        - web
+      middlewares:
+        - react-ui-middleware
+        - react-ui-stripprefix
+
+    # Optional: HTTPS router
+    # react-ui-router-secure:
+    #   rule: "PathPrefix(`/app`)"
+    #   service: react-ui-service
+    #   entryPoints:
+    #     - websecure
+    #   middlewares:
+    #     - react-ui-middleware
+    #     - react-ui-stripprefix
+    #   tls:
+    #     certResolver: letsencrypt
+
+  # Middlewares
+  middlewares:
+    # Strip /app prefix before forwarding to React server
+    react-ui-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/app"
+        forceSlash: false
+
+    # Headers middleware for React SPA
+    react-ui-middleware:
+      headers:
+        customRequestHeaders:
+          # Forward original path for React Router
+          X-Original-Path: "/app"
+          X-Forwarded-Prefix: "/app"
+        customResponseHeaders:
+          # CORS headers if needed
+          Access-Control-Allow-Origin: "*"
+          Access-Control-Allow-Methods: "GET, POST, PUT, DELETE, OPTIONS"
+          Access-Control-Allow-Headers: "Content-Type, Authorization"
+        # Content Security Policy for React app
+        contentTypeNosniff: true
+        frameDeny: true
+        browserXssFilter: true
