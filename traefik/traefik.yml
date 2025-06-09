@@ -1,0 +1,100 @@
+# External services configuration
+# This file defines services running on other servers
+http:
+  # Define your external services here
+  services:
+    sample-app-backend:
+      loadBalancer:
+        servers:
+          - url: "http://YOUR_BACKEND_SERVER_IP:YOUR_BACKEND_PORT"
+        healthCheck:
+          path: "/health"  # Adjust based on your backend health endpoint
+          interval: "30s"
+          timeout: "5s"
+    
+    sample-app-frontend:
+      loadBalancer:
+        servers:
+          - url: "http://YOUR_FRONTEND_SERVER_IP:YOUR_FRONTEND_PORT"
+        healthCheck:
+          path: "/"
+          interval: "30s"
+          timeout: "5s"
+
+  # Define middlewares for common functionality
+  middlewares:
+    # CORS middleware for API requests
+    cors-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        accessControlAllowOriginList:
+          - "*"  # Adjust for production
+        accessControlAllowHeaders:
+          - "*"
+        accessControlExposeHeaders:
+          - "*"
+        accessControlAllowCredentials: true
+        accessControlMaxAge: 100
+        addVaryHeader: true
+
+    # Security headers
+    security-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        sslRedirect: false  # Set to true if using HTTPS
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: false
+
+    # Rate limiting
+    rate-limit:
+      rateLimit:
+        burst: 100
+        average: 50
+
+    # Strip path prefix (useful for API versioning)
+    strip-api-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api"
+
+  # Define routers
+  routers:
+    # Frontend application router
+    sample-app-frontend:
+      rule: "Host(`yourapp.yourdomain.com`)"
+      service: sample-app-frontend
+      entryPoints:
+        - web
+      middlewares:
+        - security-headers
+
+    # Backend API router
+    sample-app-api:
+      rule: "Host(`api.yourapp.yourdomain.com`) || (Host(`yourapp.yourdomain.com`) && PathPrefix(`/api`))"
+      service: sample-app-backend
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - rate-limit
+
+    # Alternative: Single domain with path-based routing
+    # sample-app-api-path:
+    #   rule: "Host(`yourapp.yourdomain.com`) && PathPrefix(`/api`)"
+    #   service: sample-app-backend
+    #   entryPoints:
+    #     - web
+    #   middlewares:
+    #     - strip-api-prefix
+    #     - cors-headers
+    #     - security-headers
