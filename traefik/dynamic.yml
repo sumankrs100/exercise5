@@ -1,0 +1,62 @@
+# Save this as ./traefik/dynamic.yml
+
+http:
+  routers:
+    # FastAPI application router
+    fastapi-app:
+      rule: "Host(`api.yourdomain.com`)"
+      entryPoints:
+        - "websecure"
+      service: "fastapi-service"
+      middlewares:
+        - "oauth2-proxy-auth"
+        - "headers-middleware"
+      tls:
+        certResolver: "letsencrypt"
+
+    # Optional: API documentation route (if you want Swagger/OpenAPI docs)
+    fastapi-docs:
+      rule: "Host(`api.yourdomain.com`) && (PathPrefix(`/docs`) || PathPrefix(`/redoc`) || PathPrefix(`/openapi.json`))"
+      entryPoints:
+        - "websecure"
+      service: "fastapi-service"
+      middlewares:
+        - "oauth2-proxy-auth"
+        - "headers-middleware"
+      tls:
+        certResolver: "letsencrypt"
+
+  services:
+    # FastAPI service pointing to your external server
+    fastapi-service:
+      loadBalancer:
+        servers:
+          - url: "http://your-fastapi-server-ip:8000"  # Replace with your FastAPI server IP and port
+        healthCheck:
+          path: "/health"  # Optional: health check endpoint
+          interval: "30s"
+          timeout: "3s"
+
+  middlewares:
+    # OAuth2-Proxy authentication middleware
+    oauth2-proxy-auth:
+      forwardAuth:
+        address: "http://oauth2-proxy:4180/oauth2/auth"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - "X-Auth-Request-User"
+          - "X-Auth-Request-Email"
+          - "X-Auth-Request-Groups"
+          - "X-Auth-Request-Preferred-Username"
+          - "X-Auth-Request-Access-Token"
+          - "Authorization"
+
+    # Additional headers middleware (optional)
+    headers-middleware:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+          X-Forwarded-Port: "443"
+        customResponseHeaders:
+          X-Frame-Options: "DENY"
+          X-Content-Type-Options: "nosniff"
