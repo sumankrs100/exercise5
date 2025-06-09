@@ -1,0 +1,117 @@
+# Keycloak Client Configuration for OAuth2-Proxy
+
+## 1. Create OAuth2-Proxy Client in Keycloak
+
+1. **Access Keycloak Admin Console**
+   - Navigate to your Keycloak admin console
+   - Select your realm
+
+2. **Create New Client**
+   - Go to `Clients` → `Create Client`
+   - **Client Type**: `OpenID Connect`
+   - **Client ID**: `oauth2-proxy` (or your preferred name)
+   - Click `Next`
+
+3. **Capability Config**
+   - **Client Authentication**: `ON`
+   - **Authorization**: `OFF` (unless you need fine-grained permissions)
+   - **Standard Flow**: `ON`
+   - **Direct Access Grants**: `OFF`
+   - Click `Next`
+
+4. **Login Settings**
+   - **Root URL**: `https://auth.yourdomain.com`
+   - **Home URL**: `https://auth.yourdomain.com`
+   - **Valid Redirect URIs**: 
+     ```
+     https://auth.yourdomain.com/oauth2/callback
+     https://auth.yourdomain.com/oauth2/callback/*
+     ```
+   - **Valid Post Logout Redirect URIs**: `https://auth.yourdomain.com/oauth2/sign_out`
+   - **Web Origins**: `https://yourdomain.com`
+
+## 2. Configure Client Scopes
+
+1. **Go to Client Scopes**
+   - Navigate to `Client Scopes` in your realm
+
+2. **Create Groups Scope** (if not exists)
+   - Click `Create Client Scope`
+   - **Name**: `groups`
+   - **Type**: `Optional`
+   - **Protocol**: `openid-connect`
+   - **Display On Consent Screen**: `ON`
+   - Save
+
+3. **Add Groups Mapper**
+   - In the `groups` scope, go to `Mappers` tab
+   - Click `Add Mapper` → `By Configuration` → `Group Membership`
+   - **Name**: `groups`
+   - **Token Claim Name**: `groups`
+   - **Full Group Path**: `OFF` (unless you want full paths)
+   - **Add to ID Token**: `ON`
+   - **Add to Access Token**: `ON`
+   - **Add to Userinfo**: `ON`
+   - Save
+
+4. **Create Roles Scope** (if not exists)
+   - Click `Create Client Scope`
+   - **Name**: `roles`
+   - **Type**: `Optional`
+   - **Protocol**: `openid-connect`
+   - Save
+
+5. **Add Roles Mapper**
+   - In the `roles` scope, go to `Mappers` tab
+   - Click `Add Mapper` → `By Configuration` → `User Realm Role`
+   - **Name**: `realm-roles`
+   - **Token Claim Name**: `realm_access.roles`
+   - **Multivalued**: `ON`
+   - **Add to ID Token**: `ON`
+   - **Add to Access Token**: `ON`
+   - **Add to Userinfo**: `ON`
+   - Save
+
+## 3. Assign Scopes to OAuth2-Proxy Client
+
+1. **Go to your OAuth2-Proxy Client**
+   - Navigate to `Clients` → Select your `oauth2-proxy` client
+
+2. **Client Scopes Tab**
+   - Go to `Client Scopes` tab
+   - Click `Add Client Scope`
+   - Add the following scopes as **Optional**:
+     - `groups`
+     - `roles`
+     - `profile`
+     - `email`
+
+## 4. Get Client Credentials
+
+1. **Go to Credentials Tab**
+   - In your OAuth2-Proxy client, click `Credentials` tab
+   - Copy the `Client Secret`
+
+## 5. Test User Setup
+
+1. **Create Test Groups** (if needed)
+   - Go to `Groups` → `Create Group`
+   - Create groups like `admin`, `users`, etc.
+
+2. **Assign Users to Groups**
+   - Go to `Users` → Select a user → `Groups` tab
+   - Join the user to appropriate groups
+
+3. **Assign Roles** (if needed)
+   - In user details, go to `Role Mappings` tab
+   - Assign realm or client roles as needed
+
+## 6. Verify Configuration
+
+After setting up, you can verify the token contains groups by:
+
+1. **Using Keycloak Token Introspection**
+2. **Checking OAuth2-Proxy logs**
+3. **Examining headers passed to your application**
+
+The groups should appear in the JWT token under the `groups` claim and be forwarded as `X-Auth-Request-Groups` header.
