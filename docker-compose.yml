@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik:ro
+      - ./logs:/var/log/traefik
+    networks:
+      - traefik-network
+    command:
+      # API and dashboard configuration
+      - --api.dashboard=true
+      - --api.insecure=true
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=traefik-network
+      # File provider for external services
+      - --providers.file.directory=/etc/traefik
+      - --providers.file.watch=true
+      # Entry points
+      - --entrypoints.web.address=:80
+      # Logging
+      - --log.level=INFO
+      - --log.filepath=/var/log/traefik/traefik.log
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+    labels:
+      - "traefik.enable=true"
+      # Dashboard route
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.yourdomain.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      # Optional: Add basic auth for dashboard security
+      # - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      # - "traefik.http.middlewares.dashboard-auth.basicauth.users=admin:$$2y$$10$$..."
+
+networks:
+  traefik-network:
+    external: true
