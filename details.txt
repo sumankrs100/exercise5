@@ -1,0 +1,567 @@
+# Traefik Deployment with OAuth2-Proxy and Keycloak Authentication
+
+## Project Structure
+
+```
+traefik-deployment/
+├── docker-compose.yml
+├── traefik/
+│   ├── traefik.yml
+│   ├── dynamic/
+│   │   ├── middlewares.yml
+│   │   └── routes.yml
+│   └── certs/
+│       ├── your-domain.crt
+│       └── your-domain.key
+├── oauth2-proxy/
+│   └── oauth2-proxy.cfg
+└── .env
+```
+
+## 1. Environment Configuration
+
+Create `.env` file:
+
+```env
+# Domain Configuration
+DOMAIN=your-intranet-domain.local
+TRAEFIK_DASHBOARD_DOMAIN=traefik.your-intranet-domain.local
+
+# OAuth2-Proxy Configuration
+OAUTH2_PROXY_CLIENT_ID=your-keycloak-client-id
+OAUTH2_PROXY_CLIENT_SECRET=your-keycloak-client-secret
+OAUTH2_PROXY_COOKIE_SECRET=your-32-char-random-string
+
+# Keycloak Configuration
+KEYCLOAK_URL=https://your-keycloak-server.local
+KEYCLOAK_REALM=your-realm
+
+# Application Configuration
+APP1_BACKEND_URL=http://your-app-server:port
+APP1_DOMAIN=app1.your-intranet-domain.local
+
+# SSL Certificate paths (relative to docker-compose.yml)
+SSL_CERT_PATH=./traefik/certs/your-domain.crt
+SSL_KEY_PATH=./traefik/certs/your-domain.key
+```
+
+## 2. Docker Compose Configuration
+
+Create `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Dashboard (optional, can be removed in production)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./traefik/certs:/etc/traefik/certs:ro
+    environment:
+      - TRAEFIK_LOG_LEVEL=INFO
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DASHBOARD_DOMAIN}`)"
+      - "traefik.http.routers.traefik-dashboard.tls=true"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=auth-chain@file"
+    networks:
+      - traefik-network
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+    container_name: oauth2-proxy
+    restart: unless-stopped
+    volumes:
+      - ./oauth2-proxy/oauth2-proxy.cfg:/etc/oauth2-proxy.cfg
+    command:
+      - --config=/etc/oauth2-proxy.cfg
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.oauth2-proxy.rule=Host(`auth.${DOMAIN}`)"
+      - "traefik.http.routers.oauth2-proxy.tls=true"
+      - "traefik.http.services.oauth2-proxy.loadbalancer.server.port=4180"
+    networks:
+      - traefik-network
+
+networks:
+  traefik-network:
+    external: false
+    name: traefik-network
+```
+
+## 3. Traefik Static Configuration
+
+Create `traefik/traefik.yml`:
+
+```yaml
+# Static configuration
+api:
+  dashboard: true
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entrypoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: traefik-network
+
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  # For Let's Encrypt (if needed in future)
+  # letsencrypt:
+  #   acme:
+  #     email: your-email@domain.com
+  #     storage: /etc/traefik/acme.json
+  #     httpChallenge:
+  #       entryPoint: web
+
+log:
+  level: INFO
+
+accessLog: {}
+
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+```
+
+## 4. Dynamic Configuration - Middlewares
+
+Create `traefik/dynamic/middlewares.yml`:
+
+```yaml
+http:
+  middlewares:
+    # OAuth2 Authentication Middleware
+    oauth2-auth:
+      forwardAuth:
+        address: "http://oauth2-proxy:4180/oauth2/auth"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - "X-Auth-Request-User"
+          - "X-Auth-Request-Email"
+          - "X-Auth-Request-Preferred-Username"
+          - "X-Auth-Request-Groups"
+
+    # Security Headers
+    security-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+          - PUT
+          - POST
+          - DELETE
+        accessControlMaxAge: 100
+        hostsProxyHeaders:
+          - "X-Forwarded-Host"
+        referrerPolicy: "same-origin"
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+        customResponseHeaders:
+          X-Frame-Options: "SAMEORIGIN"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+
+    # Rate Limiting
+    rate-limit:
+      rateLimit:
+        burst: 100
+        average: 50
+
+    # Compression
+    compression:
+      compress: {}
+
+    # CORS for APIs
+    cors-headers:
+      headers:
+        accessControlAllowOriginList:
+          - "https://*.your-intranet-domain.local"
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+          - "X-Requested-With"
+
+    # Chain middlewares for authenticated routes
+    auth-chain:
+      chain:
+        middlewares:
+          - oauth2-auth
+          - security-headers
+          - compression
+          - rate-limit
+
+    # Chain for public routes (no auth)
+    public-chain:
+      chain:
+        middlewares:
+          - security-headers
+          - compression
+          - rate-limit
+
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/your-domain.crt
+      keyFile: /etc/traefik/certs/your-domain.key
+      stores:
+        - default
+  
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/your-domain.crt
+        keyFile: /etc/traefik/certs/your-domain.key
+```
+
+## 5. Dynamic Configuration - Routes
+
+Create `traefik/dynamic/routes.yml`:
+
+```yaml
+http:
+  routers:
+    # Sample Application 1 - Protected Route
+    app1:
+      rule: "Host(`app1.your-intranet-domain.local`)"
+      service: "app1-service"
+      tls: true
+      middlewares:
+        - "auth-chain@file"
+
+    # Sample Application 2 - Public Route (example)
+    app2-public:
+      rule: "Host(`public.your-intranet-domain.local`)"
+      service: "app2-service"
+      tls: true
+      middlewares:
+        - "public-chain@file"
+
+    # API Route with CORS
+    api-v1:
+      rule: "Host(`api.your-intranet-domain.local`) && PathPrefix(`/api/v1`)"
+      service: "api-service"
+      tls: true
+      middlewares:
+        - "auth-chain@file"
+        - "cors-headers@file"
+
+  services:
+    # Application Services
+    app1-service:
+      loadBalancer:
+        servers:
+          - url: "http://your-app-server:port"
+        healthCheck:
+          path: "/health"
+          interval: 30s
+          timeout: 5s
+
+    app2-service:
+      loadBalancer:
+        servers:
+          - url: "http://your-app2-server:port"
+
+    api-service:
+      loadBalancer:
+        servers:
+          - url: "http://your-api-server:port"
+        healthCheck:
+          path: "/api/v1/health"
+          interval: 30s
+          timeout: 5s
+```
+
+## 6. OAuth2-Proxy Configuration
+
+Create `oauth2-proxy/oauth2-proxy.cfg`:
+
+```ini
+# OAuth2-Proxy Configuration for Keycloak
+
+# Server Configuration
+http_address = "0.0.0.0:4180"
+reverse_proxy = true
+real_client_ip_header = "X-Forwarded-For"
+
+# Provider Configuration
+provider = "keycloak-oidc"
+provider_display_name = "Keycloak SSO"
+oidc_issuer_url = "https://your-keycloak-server.local/realms/your-realm"
+
+# Client Configuration
+client_id = "your-keycloak-client-id"
+client_secret = "your-keycloak-client-secret"
+redirect_url = "https://auth.your-intranet-domain.local/oauth2/callback"
+
+# Scopes
+scope = "openid email profile groups"
+
+# Cookie Configuration
+cookie_secret = "your-32-char-random-string"
+cookie_secure = true
+cookie_httponly = true
+cookie_samesite = "lax"
+cookie_expire = "24h"
+cookie_refresh = "1h"
+cookie_name = "_oauth2_proxy"
+cookie_domains = ".your-intranet-domain.local"
+
+# Session Configuration
+session_store_type = "cookie"
+
+# Security
+force_https = true
+ssl_insecure_skip_verify = false
+
+# Upstream Configuration
+upstreams = [
+    "static://202"
+]
+
+# Email domain restrictions (optional)
+# email_domains = ["your-company.com"]
+
+# Skip authentication for certain paths
+skip_auth_regex = [
+    "^/oauth2/.*",
+    "^/ping$",
+    "^/health$"
+]
+
+# Logging
+request_logging = true
+auth_logging = true
+standard_logging = true
+```
+
+## 7. Keycloak Client Configuration Steps
+
+### Step 1: Create Client in Keycloak
+
+1. Login to Keycloak Admin Console
+2. Navigate to your realm
+3. Go to **Clients** → **Create Client**
+
+### Step 2: Client Settings
+
+**General Settings:**
+- **Client ID:** `traefik-oauth2-proxy`
+- **Name:** `Traefik OAuth2 Proxy`
+- **Description:** `OAuth2 Proxy for Traefik Authentication`
+- **Client Protocol:** `openid-connect`
+- **Client Authentication:** `ON`
+
+**Capability Config:**
+- **Client Authentication:** `ON`
+- **Authorization:** `OFF`
+- **Standard Flow:** `ON`
+- **Direct Access Grants:** `OFF`
+- **Service Accounts:** `OFF`
+
+### Step 3: Access Settings
+
+**Valid Redirect URIs:**
+```
+https://auth.your-intranet-domain.local/oauth2/callback
+https://auth.your-intranet-domain.local/oauth2/sign_in
+```
+
+**Valid Post Logout Redirect URIs:**
+```
+https://auth.your-intranet-domain.local/oauth2/sign_out
+```
+
+**Web Origins:**
+```
+https://*.your-intranet-domain.local
+```
+
+### Step 4: Client Scopes
+
+Add the following client scopes:
+- `openid` (default)
+- `email` (default)
+- `profile` (default)
+- `groups` (optional)
+
+### Step 5: Mappers (Optional)
+
+Create custom mappers if needed:
+
+**Groups Mapper:**
+- **Name:** `groups`
+- **Mapper Type:** `Group Membership`
+- **Token Claim Name:** `groups`
+- **Full Group Path:** `OFF`
+- **Add to ID Token:** `ON`
+- **Add to Access Token:** `ON`
+- **Add to Userinfo:** `ON`
+
+## 8. SSL Certificate Setup
+
+Place your SSL certificates in the `traefik/certs/` directory:
+- `your-domain.crt` (certificate file)
+- `your-domain.key` (private key file)
+
+For wildcard certificates, ensure the certificate covers `*.your-intranet-domain.local`.
+
+## 9. Deployment Steps
+
+### Step 1: Prepare Directory Structure
+```bash
+mkdir -p traefik-deployment/{traefik/{dynamic,certs},oauth2-proxy}
+cd traefik-deployment
+```
+
+### Step 2: Copy Configuration Files
+- Copy all configuration files to their respective directories
+- Place SSL certificates in `traefik/certs/`
+- Update `.env` file with your actual values
+
+### Step 3: Generate Cookie Secret
+```bash
+# Generate a random 32-character string for cookie secret
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### Step 4: Deploy Stack
+```bash
+# Create network
+docker network create traefik-network
+
+# Start services
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f
+```
+
+## 10. Adding New Applications
+
+To add a new application, follow these steps:
+
+### Step 1: Update `.env` file
+```env
+# Add new application variables
+APP_NEW_BACKEND_URL=http://new-app-server:port
+APP_NEW_DOMAIN=newapp.your-intranet-domain.local
+```
+
+### Step 2: Update `routes.yml`
+```yaml
+http:
+  routers:
+    newapp:
+      rule: "Host(`newapp.your-intranet-domain.local`)"
+      service: "newapp-service"
+      tls: true
+      middlewares:
+        - "auth-chain@file"  # For protected routes
+        # - "public-chain@file"  # For public routes
+
+  services:
+    newapp-service:
+      loadBalancer:
+        servers:
+          - url: "http://new-app-server:port"
+        healthCheck:
+          path: "/health"  # Optional
+          interval: 30s
+          timeout: 5s
+```
+
+### Step 3: Restart Traefik
+```bash
+docker-compose restart traefik
+```
+
+## 11. Testing and Verification
+
+### Test OAuth2 Flow
+1. Access `https://app1.your-intranet-domain.local`
+2. You should be redirected to Keycloak login
+3. After successful authentication, you should be redirected back to the application
+
+### Test Dashboard Access
+1. Access `https://traefik.your-intranet-domain.local`
+2. Should require authentication through OAuth2-Proxy
+
+### Verify SSL
+```bash
+curl -I https://app1.your-intranet-domain.local
+```
+
+## 12. Troubleshooting
+
+### Common Issues:
+
+1. **SSL Certificate Issues:**
+   - Verify certificate paths in docker-compose.yml
+   - Check certificate validity: `openssl x509 -in cert.crt -text -noout`
+
+2. **OAuth2-Proxy Authentication Issues:**
+   - Check Keycloak client configuration
+   - Verify redirect URIs match exactly
+   - Check logs: `docker logs oauth2-proxy`
+
+3. **Traefik Routing Issues:**
+   - Check dynamic configuration: `docker logs traefik`
+   - Verify DNS resolution for domains
+   - Check if services are reachable from Traefik container
+
+4. **Network Connectivity:**
+   - Ensure all services can communicate
+   - Verify firewall rules
+   - Test connectivity: `docker exec traefik ping your-app-server`
+
+### Useful Commands:
+```bash
+# View Traefik configuration
+docker exec traefik cat /etc/traefik/traefik.yml
+
+# Check OAuth2-Proxy configuration
+docker exec oauth2-proxy cat /etc/oauth2-proxy.cfg
+
+# Monitor logs
+docker-compose logs -f traefik oauth2-proxy
+
+# Test internal connectivity
+docker exec traefik nslookup your-app-server
+```
+
+This configuration provides a robust, scalable setup for Traefik with OAuth2 authentication through Keycloak, SSL support, and easy application addition capabilities.
