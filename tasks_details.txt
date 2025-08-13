@@ -1,0 +1,11 @@
+Four celery workers
+1. Retrieve recordings from webex and stores in s3 bucket
+2. Transcribe recordings and generates the text from the speech
+3. generates meeting minutes and meeting summary from the transcribed text, if for environment variable is enabled for the same
+4. Sends email before start of starting processing and end of the processing of the recordings
+
+four batch jobs
+1. Batch job which monitor webex using API if any new recording is available in last 7 days, if available then submits a chain of celery task in sequence sends email (start of processing)->retrieve recording from webex -> transcribe recording-> generates meeting minutes and meeting summary-> send email to user for completing the processing of recording
+2. Batch job to start process recordings which are uploaded manually using UI. submits celery tasks in chain like, transcibe recording -> generates meeting minutes and summary -> send email for completion of processing
+3. Batch job to process and generated the meeting minutes and meeting summary for which it was not generated earlier due to any reason, submits a single celery task to generate meeting minutes and summary
+4. Batch job to find the meeting recordings which are about to expire in next 2 weeks and send notification once. And delete the recordings from s3 bucket which are already expired and if marked deleted from UI. Submits a celery task to send email notification to user for meeting expiry
