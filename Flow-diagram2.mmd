@@ -1,0 +1,63 @@
+---
+config:
+  layout: dagre
+  theme: redux
+---
+flowchart TD
+ subgraph User_Facing["User_Facing"]
+        UI["💻 UI for Manual Uploads"]
+        User["👤 User"]
+  end
+ subgraph Batch_Jobs["Batch_Jobs"]
+    direction LR
+        B1["Batch 1: Monitor Webex"]
+        B2["Batch 2: Process Manual Uploads"]
+        B3["Batch 3: Reprocess Minutes"]
+        B4["Batch 4: Handle Expiry"]
+  end
+ subgraph External_Services["External_Services"]
+        Webex["🌐 Webex API"]
+  end
+  subgraph Internal_Services["Internal_Services"]
+        S3[("📦 S3 Bucket")]
+  end
+ subgraph Celery_Infrastructure["Celery_Infrastructure"]
+        Broker[("Redis Message Broker")]
+        W1["C1: Retrieve Recording Worker"]
+        W2["C2: Transcribe Worker"]
+        W3["C3: Generate Minutes/Summary Worker"]
+        W4["C4: Email Notification Worker"]
+  end
+ subgraph Data_and_State["Data_and_State"]
+        DB[("🗄️ Application DB")]
+  end
+ subgraph STT_Service["Speech-To-Text-Service"]
+        STT["🗄️ STT Service"]
+ end
+ subgraph LLM_Service["LLM-Service"]
+        LLM["🗄️ LLM Service"]
+ end
+    User -- Interacts with --> UI
+    UI -- Triggers --> B2
+    B1 -- Polls --> Webex
+    B1 -- Submits Chain --> Broker
+    B2 -- Submits Chain --> Broker
+    B3 -- Queries --> DB
+    B3 -- Submits Task --> Broker
+    B4 -- Queries --> DB
+    B4 -- Submits Task --> Broker
+    B4 -- Deletes from --> S3
+    W2 -- API Call --> STT
+    W3 -- API Call --> LLM
+    Broker -- Distributes Tasks --> W1 & W2 & W3 & W4
+    W1 -- Chain call --> W2
+    W2 -- Chain call --> W3
+    W3 -- Chain call --> W4
+    W2 -- Updates DB --> DB
+    W4 -- Fetch and updates DB --> DB
+    W1 -- Downloads from --> Webex
+    W1 -- Stores in --> S3
+    W2 -- Retrieves from --> S3
+    W3 -- Uses Data from --> DB
+    W3 -- Stores results in --> DB
+    W4 -- Sends Email to --> User
